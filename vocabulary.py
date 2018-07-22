@@ -28,7 +28,7 @@ def convert_to_ids(dataset, vocabulary):
     return [[vocabulary[token] for token in sample] for sample in dataset]
 
 
-def append_term_symbol(dataset, terminal_token='<e>'):
+def append_terminal_token(dataset, terminal_token='<e>'):
     """Appends end-of-sequence token to each sequence.
     :param dataset - a 2-d array, contains sequences of tokens.
     :param terminal_token (Optional) which symbol to append.

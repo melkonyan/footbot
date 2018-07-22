@@ -3,40 +3,45 @@ import tensorflow as tf
 
 class RNNConfig:
     """Config for this RNN."""
-    layers = [512],
-    dropout_keep_prob =0.8
+
+    def __init__(self, layers=[512]):
+        """Create a config
+        :param layers 1-d array with number of hidden units in each layer.
+        """
+        self.layers = layers
 
 
 class RNN:
 
-    def __init__(self, config, batch_size, size_out):
+    def __init__(self, config, batch_size, dict_size):
         """Create RNN
         :param config an instance of rnn.RNNConfig
         :param batch_size size of a training/validation batch
-        :param size_out number of units in the output vector."""
+        :param dict_size number of units in the vocabulary
+        ."""
         self._config = config
         self._batch_size = batch_size
-        self._size_out = size_out
+        self._dict_size = dict_size
         self._rnn_step, self._zero_state = self._build_rnn()
 
     def _build_rnn(self):
-        with tf.variable_scope('rnn_step'):
+        with tf.variable_scope('rnn_step', reuse=True):
             lstms = [tf.nn.rnn_cell.BasicLSTMCell(size_hidden) for size_hidden in
-                     self._config['layers']]
+                     self._config.layers]
+            projection_layer = tf.layers.Dense(self._dict_size)
             rnn = tf.nn.rnn_cell.MultiRNNCell(lstms)
-            projection_layer = tf.layers.Dense(self._size_out)
 
-        def rnn_step(inputs, state):
-            rnn_output, new_state = rnn(inputs, state)
-            output = projection_layer(rnn_output)
-            return output, new_state
+            def rnn_step(inputs, state):
+                rnn_output, new_state = rnn(inputs, state)
+                output = projection_layer(rnn_output)
+                return output, new_state
 
-        return rnn_step, rnn.zero_state
+            return rnn_step, rnn.zero_state
 
     def _unwrap(self, rnn_step, init_inputs, init_state, next_inputs_fn, finished_fn, seq_len):
         state = init_state
         inputs = init_inputs
-        zero_outputs = tf.zeros(shape=(self._batch_size, self._size_out))
+        zero_outputs = tf.zeros(shape=(self._batch_size, self._dict_size))
         finished = tf.constant(False, shape=(self._batch_size,))
         output_seq = []
         for step in range(seq_len):
@@ -57,19 +62,20 @@ class RNN:
         In both modes output state from i-th step is used as input state at step i+1.
         Once finish_fn tells that sequence should be terminated, this RNN will append
         zero outputs instead of actual model outputs to the output sequence.
-        :param init_inputs: inputs at the step one.
+        :param init_inputs: tensor of shape (batch_size, inputs at the step one.
         :param init_state: state at step one.
         :param finished_fn: callable, called with params (step, outputs) should return
         :param seq_len: number of steps to unwrap.
         :param is_training: whether in training mode or not.
         :param labels: desired outputs.
         """
-        labels_seq_len = labels.shape[1]
-        if labels_seq_len != seq_len:
-            raise ValueError('Labels sequence length should be equal to seq_len ({} != {}'
-                             .format(labels_seq_len, seq_len))
         if is_training and labels is None:
             raise ValueError('If model is in training mode, labels can not be None')
+        if labels is not None:
+            labels_seq_len = labels.shape[1]
+            if labels_seq_len != seq_len:
+                raise ValueError('Labels sequence length should be equal to seq_len ({} != {}'
+                                 .format(labels_seq_len, seq_len))
 
         def next_inputs_from_labels(step, outputs, state):
             del outputs, state # Unused
@@ -78,7 +84,7 @@ class RNN:
         def next_inputs_from_outputs(step, outputs, state):
             del step, state # Unused
             max_tokens = tf.argmax(outputs, axis=-1)
-            return tf.one_hot(indices = max_tokens, depth=self._size_out, axis=-1)
+            return tf.one_hot(indices = max_tokens, depth=self._dict_size, axis=-1)
 
         next_inputs = next_inputs_from_labels if is_training else next_inputs_from_outputs
         return self._unwrap(self._rnn_step, init_inputs, init_state,
