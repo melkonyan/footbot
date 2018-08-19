@@ -4,11 +4,13 @@ import tensorflow as tf
 class RNNConfig:
     """Config for this RNN."""
 
-    def __init__(self, layers=[512]):
+    def __init__(self, layers=[512], embedding_size=None):
         """Create a config
         :param layers 1-d array with number of hidden units in each layer.
+        :param embedding_size size of the embedding. If None, no embedding is used.
         """
         self.layers = layers
+        self.embedding_size = embedding_size
 
 
 class RNN:
@@ -20,6 +22,11 @@ class RNN:
         :param dict_size number of units in the vocabulary
         ."""
         self._config = config
+        if config.embedding_size is not None:
+            self.embedding_matrix = tf.get_variable("embedding_matrix",
+            [dict_size, config.embedding_size])
+        else:
+            self.embedding_matrix = None
         self._batch_size = batch_size
         self._dict_size = dict_size
         self._rnn_step, self._zero_state = self._build_rnn()
@@ -32,8 +39,18 @@ class RNN:
             rnn = tf.nn.rnn_cell.MultiRNNCell(lstms)
 
             def rnn_step(inputs, state):
+                """Execute one rnn cell.
+
+                :param inputs: An int32 Tensor of shape [batch_size,]
+                :param state: RNN state.
+                :return: (output, new_state). Output is a float tensor [batch_size, dict_size]
+                """
+                if self.embedding_matrix is not None:
+                    inputs = tf.nn.embedding_lookup(self.embedding_matrix, inputs)
+                else:
+                    inputs = tf.one_hot(indices=inputs, depth=self._dict_size, axis=-1)
                 rnn_output, new_state = rnn(inputs, state)
-                output = projection_layer(rnn_output)
+                output= projection_layer(rnn_output)
                 return output, new_state
 
             return rnn_step, rnn.zero_state
@@ -79,12 +96,12 @@ class RNN:
 
         def next_inputs_from_labels(step, outputs, state):
             del outputs, state # Unused
-            return labels[:, step, :]
+            return labels[:, step]
 
         def next_inputs_from_outputs(step, outputs, state):
             del step, state # Unused
             max_tokens = tf.argmax(outputs, axis=-1)
-            return tf.one_hot(indices = max_tokens, depth=self._dict_size, axis=-1)
+            return max_tokens
 
         next_inputs = next_inputs_from_labels if is_training else next_inputs_from_outputs
         return self._unwrap(self._rnn_step, init_inputs, init_state,
